@@ -386,7 +386,7 @@ This project is for educational/assignment purposes.
 
 ## 👤 Author
 
-RAG_Sanskrit_<YourName>
+RAG_Sanskrit_Ashish_Tiwari
 
 ---
 
