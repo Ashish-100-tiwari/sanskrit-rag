@@ -25,9 +25,6 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     answer: str
-    context: Optional[str]
-    query: str
-    retrieved_sources: List[dict]
 
 
 class HealthResponse(BaseModel):
@@ -64,9 +61,9 @@ def initialize_pipeline():
     data_dir = os.getenv("DATA_DIR", "../data")
     model_path = os.getenv("MODEL_PATH", None)
     embedding_model = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    chunk_size = int(os.getenv("CHUNK_SIZE", "500"))
-    chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "100"))
-    top_k = int(os.getenv("TOP_K", "5"))
+    chunk_size = int(os.getenv("CHUNK_SIZE", "200"))
+    chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "30"))
+    top_k = int(os.getenv("TOP_K", "2"))
     
     print("Initializing RAG Pipeline...")
     print(f"  Data directory: {data_dir}")
@@ -82,9 +79,12 @@ def initialize_pipeline():
         top_k=top_k
     )
     
-    # Index documents
+    # Index documents and pre-load models
     try:
         rag_pipeline.index_documents()
+        # Ensure models are pre-loaded
+        if hasattr(rag_pipeline, '_preload_models'):
+            rag_pipeline._preload_models()
     except Exception as e:
         print(f"Warning: Could not index documents: {e}")
         print("You may need to index documents manually via /index endpoint")
@@ -129,7 +129,7 @@ async def health():
 
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
-    """Query the RAG system"""
+    """Query the RAG system - optimized to return only answer"""
     if rag_pipeline is None:
         raise HTTPException(status_code=503, detail="RAG pipeline not initialized")
     
@@ -141,26 +141,11 @@ async def query(request: QueryRequest):
         if request.top_k:
             rag_pipeline.top_k = request.top_k
         
-        # Query the pipeline
+        # Query the pipeline - optimized path
         result = rag_pipeline.query(request.question, use_rag=request.use_rag)
         
-        # Format response
-        retrieved_sources = []
-        if result.get('retrieved_chunks'):
-            for chunk in result['retrieved_chunks']:
-                retrieved_sources.append({
-                    'source': chunk['metadata']['filename'],
-                    'chunk_index': chunk['metadata']['chunk_index'],
-                    'score': chunk['score'],
-                    'text_preview': chunk['text'][:200] + "..." if len(chunk['text']) > 200 else chunk['text']
-                })
-        
-        return QueryResponse(
-            answer=result['answer'],
-            context=result.get('context'),
-            query=result['query'],
-            retrieved_sources=retrieved_sources
-        )
+        # Return only answer for minimal latency
+        return QueryResponse(answer=result['answer'])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
 

@@ -24,17 +24,19 @@ class VectorRetriever:
         self.vector_store_path = Path("../data/vector_store.npz")
         
     def load_model(self):
-        """Load the embedding model"""
+        """Load the embedding model - optimized for speed"""
         try:
             from sentence_transformers import SentenceTransformer
-            print(f"Loading embedding model: {self.model_name}")
-            self.embedding_model = SentenceTransformer(self.model_name)
-            print("Model loaded successfully")
+            if self.embedding_model is None:
+                print(f"Loading embedding model: {self.model_name}")
+                # Use device='cpu' explicitly and disable progress bars for speed
+                self.embedding_model = SentenceTransformer(self.model_name, device='cpu')
+                print("Model loaded successfully")
         except ImportError:
             raise ImportError("sentence-transformers is required. Install with: pip install sentence-transformers")
     
     def create_embeddings(self, chunks: List[Dict[str, any]]):
-        """Create embeddings for all chunks"""
+        """Create embeddings for all chunks - optimized"""
         if self.embedding_model is None:
             self.load_model()
         
@@ -42,10 +44,13 @@ class VectorRetriever:
         texts = [chunk['text'] for chunk in chunks]
         
         print(f"Creating embeddings for {len(texts)} chunks...")
+        # Optimized encoding with batch processing
         self.embeddings = self.embedding_model.encode(
             texts,
-            show_progress_bar=True,
-            convert_to_numpy=True
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            batch_size=32,  # Optimized batch size
+            normalize_embeddings=True  # Pre-normalize for faster similarity
         )
         print(f"Created embeddings with shape: {self.embeddings.shape}")
         
@@ -85,22 +90,32 @@ class VectorRetriever:
             return True
         return False
     
-    def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, any]]:
-        """Retrieve top-k most relevant chunks for a query"""
+    def retrieve(self, query: str, top_k: int = 3) -> List[Dict[str, any]]:
+        """Retrieve top-k most relevant chunks - optimized for speed"""
         if self.embedding_model is None:
             self.load_model()
         
         if self.embeddings is None or len(self.chunks) == 0:
             raise ValueError("No embeddings found. Please create embeddings first.")
         
-        # Encode query
-        query_embedding = self.embedding_model.encode([query], convert_to_numpy=True)
+        # Encode query - optimized
+        query_embedding = self.embedding_model.encode(
+            [query], 
+            convert_to_numpy=True, 
+            show_progress_bar=False, 
+            batch_size=1,
+            normalize_embeddings=True  # Already normalized if embeddings are normalized
+        )
         
-        # Compute cosine similarity
+        # Fast dot product (embeddings are pre-normalized)
         similarities = np.dot(self.embeddings, query_embedding.T).flatten()
         
-        # Get top-k indices
-        top_indices = np.argsort(similarities)[::-1][:top_k]
+        # Use argpartition for faster top-k (O(n) vs O(n log n))
+        if top_k < len(similarities):
+            top_indices = np.argpartition(similarities, -top_k)[-top_k:]
+            top_indices = top_indices[np.argsort(similarities[top_indices])[::-1]]
+        else:
+            top_indices = np.argsort(similarities)[::-1]
         
         # Retrieve top-k chunks with scores
         results = []
@@ -113,15 +128,23 @@ class VectorRetriever:
         
         return results
     
-    def get_context(self, query: str, top_k: int = 5) -> str:
-        """Get formatted context string from retrieved chunks"""
+    def get_context(self, query: str, top_k: int = 2, max_chars: int = 200) -> str:
+        """Get optimized context string - limited to max_chars for faster processing"""
         results = self.retrieve(query, top_k)
         context_parts = []
+        total_chars = 0
         
-        for i, result in enumerate(results, 1):
-            context_parts.append(
-                f"[Source: {result['metadata']['filename']}, Chunk {result['metadata']['chunk_index']+1}]\n"
-                f"{result['text']}\n"
-            )
+        for result in results:
+            text = result['text']
+            # Truncate if needed
+            remaining = max_chars - total_chars
+            if remaining <= 0:
+                break
+            if len(text) > remaining:
+                text = text[:remaining]
+            context_parts.append(text)
+            total_chars += len(text)
+            if total_chars >= max_chars:
+                break
         
-        return "\n".join(context_parts)
+        return " ".join(context_parts)

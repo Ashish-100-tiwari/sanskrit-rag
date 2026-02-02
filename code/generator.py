@@ -16,11 +16,11 @@ class LLMGenerator:
         
         Args:
             model_path: Path to GGUF model file
-            n_ctx: Context window size (defaults to env var or 2048)
+            n_ctx: Context window size (defaults to env var or 512 for optimization)
             n_threads: Number of CPU threads to use (defaults to env var or 4)
         """
         self.model_path = model_path or os.getenv("MODEL_PATH")
-        self.n_ctx = n_ctx or int(os.getenv("N_CTX", "2048"))
+        self.n_ctx = n_ctx or int(os.getenv("N_CTX", "512"))
         self.n_threads = n_threads or int(os.getenv("N_THREADS", "4"))
         self.llm = None
         
@@ -35,11 +35,16 @@ class LLMGenerator:
         try:
             from llama_cpp import Llama
             print(f"Loading model from {self.model_path}...")
+            # Highly optimized settings for speed
             self.llm = Llama(
                 model_path=self.model_path,
                 n_ctx=self.n_ctx,
                 n_threads=self.n_threads,
-                verbose=False
+                n_batch=512,  # Larger batch for faster processing
+                n_gpu_layers=0,  # CPU only
+                verbose=False,
+                use_mmap=True,  # Memory mapping for faster loading
+                use_mlock=False  # Don't lock memory
             )
             print("Model loaded successfully")
         except ImportError:
@@ -48,37 +53,36 @@ class LLMGenerator:
                 "For CPU-only builds: pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu"
             )
     
-    def generate(self, prompt: str, max_tokens: int = 256, temperature: float = 0.7, top_p: float = 0.9) -> str:
-        """Generate text from prompt"""
+    def generate(self, prompt: str, max_tokens: int = 128, temperature: float = 0.5, top_p: float = 0.9) -> str:
+        """Generate text from prompt - highly optimized for speed"""
         if self.llm is None:
             self.load_model()
         
-        # Create the full prompt
+        # Highly optimized generation parameters for minimal latency
         response = self.llm(
             prompt,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
+            top_k=20,  # Limit top_k for faster sampling
             echo=False,
-            stop=["\n\n", "Human:", "Question:"]
+            stop=["\n\n", "Human:", "Question:", "\n"],
+            repeat_penalty=1.1,
+            tfs_z=1.0,  # Tail free sampling
+            mirostat_mode=0  # Disable mirostat for speed
         )
         
         return response['choices'][0]['text'].strip()
     
     def generate_rag_response(self, query: str, context: str, system_prompt: Optional[str] = None) -> str:
-        """Generate RAG response with context"""
-        if system_prompt is None:
-            system_prompt = """You are a helpful assistant that answers questions based on the provided Sanskrit document context. 
-Answer in a clear and informative manner. If the context doesn't contain enough information, say so."""
+        """Generate RAG response with context - highly optimized for speed"""
+        # Limit context to 200 chars for minimal latency
+        max_context_chars = 200
+        if len(context) > max_context_chars:
+            context = context[:max_context_chars] + "..."
         
-        # Construct the prompt
-        prompt = f"""{system_prompt}
-
-Context from Sanskrit documents:
-{context}
-
-Question: {query}
-
-Answer:"""
+        # Ultra-compact prompt for fastest generation
+        prompt = f"{context}\nQ: {query}\nA:"
         
-        return self.generate(prompt, max_tokens=512, temperature=0.7)
+        # Reduced tokens and temperature for speed
+        return self.generate(prompt, max_tokens=128, temperature=0.4)

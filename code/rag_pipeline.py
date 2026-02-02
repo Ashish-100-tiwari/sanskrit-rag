@@ -16,9 +16,9 @@ class RAGPipeline:
         data_dir: str = "../data",
         model_path: Optional[str] = None,
         embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-        chunk_size: int = 500,
-        chunk_overlap: int = 100,
-        top_k: int = 5
+        chunk_size: int = 300,
+        chunk_overlap: int = 50,
+        top_k: int = 3
     ):
         """
         Initialize RAG Pipeline
@@ -43,6 +43,7 @@ class RAGPipeline:
         
         # State
         self.is_indexed = False
+        self._models_loaded = False
     
     def index_documents(self, force_reindex: bool = False):
         """Index all documents in the data directory"""
@@ -69,6 +70,9 @@ class RAGPipeline:
         
         self.is_indexed = True
         print("Indexing complete!")
+        
+        # Pre-load models for faster queries
+        self._preload_models()
     
     def query(self, question: str, use_rag: bool = True) -> Dict[str, any]:
         """
@@ -85,25 +89,39 @@ class RAGPipeline:
             raise ValueError("Documents not indexed. Call index_documents() first.")
         
         if use_rag:
-            # Retrieve relevant context
-            retrieved_chunks = self.retriever.retrieve(question, top_k=self.top_k)
-            context = self.retriever.get_context(question, top_k=self.top_k)
+            # Optimized: retrieve and get context in one pass
+            context = self.retriever.get_context(question, top_k=self.top_k, max_chars=400)
             
             # Generate response with context
             answer = self.generator.generate_rag_response(question, context)
             
             return {
                 'answer': answer,
-                'context': context,
-                'retrieved_chunks': retrieved_chunks,
+                'context': None,  # Don't return context for optimization
+                'retrieved_chunks': [],  # Don't return chunks for optimization
                 'query': question
             }
         else:
             # Generate without context
-            answer = self.generator.generate(question)
+            answer = self.generator.generate(question, max_tokens=256)
             return {
                 'answer': answer,
                 'context': None,
                 'retrieved_chunks': [],
                 'query': question
             }
+    
+    def _preload_models(self):
+        """Pre-load models to avoid loading delay on first query"""
+        if not self._models_loaded:
+            print("Pre-loading models for faster queries...")
+            # Pre-load embedding model
+            self.retriever.load_model()
+            # Pre-load LLM model if path is set
+            if self.generator.model_path:
+                try:
+                    self.generator.load_model()
+                except Exception as e:
+                    print(f"Warning: Could not pre-load LLM model: {e}")
+            self._models_loaded = True
+            print("Models pre-loaded successfully")
