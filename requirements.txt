@@ -1,0 +1,27 @@
+# Build tools (required first)
+setuptools>=65.0.0
+wheel>=0.38.0
+
+# FastAPI and server dependencies
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0,<3.0.0
+
+# Document processing
+PyPDF2>=3.0.0
+python-docx>=1.1.0
+
+# Embeddings and retrieval
+sentence-transformers>=2.2.0
+numpy>=1.24.0,<2.0.0
+torch>=2.0.0
+
+# LLM (llama.cpp)
+# Note: llama-cpp-python may need special installation
+# For CPU-only: pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# Or install pre-built wheel: pip install llama-cpp-python
+llama-cpp-python>=0.2.0
+
+# Utilities
+python-multipart>=0.0.6
+python-dotenv>=1.0.0
